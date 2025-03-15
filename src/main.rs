@@ -268,7 +268,50 @@ async fn main() {
                 apkpure::list_versions(list, options).await;
             }
             DownloadSource::GooglePlay => {
-                google_play::list_versions(list);
+                let mut email = matches.get_one::<String>("google_email").map(|v| v.to_string());
+                let mut aas_token = matches.get_one::<String>("google_aas_token").map(|v| v.to_string());
+                let accept_tos = matches.get_one::<bool>("google_accept_tos").map_or(false, |v| *v);
+                
+                let ini_file = matches.get_one::<String>("ini").map(|ini_file| {
+                    match fs::canonicalize(ini_file) {
+                        Ok(ini_file) if Path::new(&ini_file).is_file() => {
+                            ini_file
+                        },
+                        _ => {
+                            println!("{}\n\nSpecified ini is not a valid file", usage);
+                            std::process::exit(1);
+                        },
+                    }
+                });
+
+                if email.is_none() || aas_token.is_none() {
+                    if let Ok(conf) = load_config(ini_file) {
+                        if email.is_none() {
+                            email = conf.get("google", "email");
+                        }
+                        if aas_token.is_none() {
+                            aas_token = conf.get("google", "aas_token");
+                        }
+                    }
+                }
+
+                if email.is_none() {
+                    let mut prompt_email = String::new();
+                    print!("Email: ");
+                    io::stdout().flush().unwrap();
+                    io::stdin().read_line(&mut prompt_email).unwrap();
+                    email = Some(prompt_email.trim().to_string());
+                }
+
+                if aas_token.is_none() {
+                    let mut prompt_aas_token = String::new();
+                    print!("AAS Token: ");
+                    io::stdout().flush().unwrap();
+                    io::stdin().read_line(&mut prompt_aas_token).unwrap();
+                    aas_token = Some(prompt_aas_token.trim().to_string());
+                }
+
+                google_play::list_versions(list, &email.unwrap(), &aas_token.unwrap(), accept_tos, options).await;
             }
             DownloadSource::FDroid => {
                 fdroid::list_versions(list, options).await;

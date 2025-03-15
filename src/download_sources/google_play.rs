@@ -141,10 +141,76 @@ pub async fn request_aas_token(
     }
 }
 
-pub fn list_versions(apps: Vec<(String, Option<String>)>) {
+pub async fn list_versions(
+    apps: Vec<(String, Option<String>)>,
+    email: &str,
+    aas_token: &str,
+    accept_tos: bool,
+    mut options: HashMap<&str, &str>,
+) {
+    let device = options.remove("device").unwrap_or("px_7a");
+    let mut gpa = Gpapi::new(device, email);
+
+    if let Some(locale) = options.remove("locale") {
+        gpa.set_locale(locale);
+    }
+    if let Some(timezone) = options.remove("timezone") {
+        gpa.set_timezone(timezone);
+    }
+
+    gpa.set_aas_token(aas_token);
+    if let Err(err) = gpa.login().await {
+        match err.kind() {
+            GpapiErrorKind::TermsOfService => {
+                if accept_tos {
+                    match gpa.accept_tos().await {
+                        Ok(_) => {
+                            if let Err(_) = gpa.login().await {
+                                eprintln!("Could not log in, even after accepting the Google Play Terms of Service");
+                                std::process::exit(1);
+                            }
+                            println!("Google Play Terms of Service accepted.");
+                        },
+                        _ => {
+                            eprintln!("Could not accept Google Play Terms of Service");
+                            std::process::exit(1);
+                        },
+                    }
+                } else {
+                    println!("{}\nPlease read the ToS here: https://play.google.com/about/play-terms/index.html\nIf you accept, please pass the --accept-tos flag.", err);
+                    std::process::exit(1);
+                }
+            },
+            _ => {
+                eprintln!("Could not log in to Google Play. Please check your credentials and try again later. {}", err);
+                std::process::exit(1);
+            }
+        }
+    }
+
     for app in apps {
         let (app_id, _) = app;
         println!("Versions available for {} on Google Play:", app_id);
-        println!("| Google Play does not make old versions of apps available.");
+        
+        match gpa.details(&app_id).await {
+            Ok(Some(details)) => {
+                if let Some(item) = details.item {
+                    if let Some(details) = item.details {
+                        if let Some(app_details) = details.app_details {
+                            if let Some(version_code) = app_details.version_code {
+                                if let Some(version_string) = app_details.version_string {
+                                    println!("| {} (version code: {})", version_string, version_code);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                println!("| Could not retrieve version information for {}.", app_id);
+            },
+            _ => {
+                println!("| Could not retrieve version information for {}.", app_id);
+            }
+        }
     }
 }
